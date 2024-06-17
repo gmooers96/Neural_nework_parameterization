@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "run_simple_big_data_65.py", line 89, in <module>
+    batch_norm = batch_norm)
+  File "../../src/ml_train_nn_big_data.py", line 98, in train_wrapper
+    weights=weights,
+  File "../../src/ml_load_big_data.py", line 69, in LoadDataStandardScaleData_v2
+    scaling_helper(train_input_variable_dict[input_vert_vars[i]])).reshape(-1,z_dim)
+ValueError: cannot reshape array of size 929811456 into shape (74)

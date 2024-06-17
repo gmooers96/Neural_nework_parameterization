@@ -1,0 +1,123 @@
+Std_ScalarNN_layers5in151out245_BN_F Using 35006976 training examples with 151 input features and 245 output targets
+the loss in this Epoch 17110.99812965095
+RMSE:  167475.91339431095  R2: 3.819930735237295e-07
+ToutR2: 0.007716505169427079
+T_adv_outR2: 3.2065742992892865e-07
+q_adv_outR2: 0.00017953327790897576
+q_auto_outR2: 0.0008444662902450007
+q_sed_flux_totR2: 0.611120947985668
+the loss in this Epoch 15247.097690045834
+RMSE:  167475.92741919574  R2: 2.1450762056217466e-07
+ToutR2: 0.006562544752169919
+T_adv_outR2: 1.5752648811663308e-07
+q_adv_outR2: 0.00017083405283786196
+q_auto_outR2: 0.000748270774579895
+q_sed_flux_totR2: 0.55473997220941
+the loss in this Epoch 14718.192638978362
+RMSE:  167475.91769964644  R2: 3.3057877093097425e-07
+ToutR2: 0.007855162128825264
+T_adv_outR2: 2.744938763408483e-07
+q_adv_outR2: 0.00015972950381143398
+q_auto_outR2: 0.0008086784180441329
+q_sed_flux_totR2: 0.6836583464299836
+the loss in this Epoch 14369.893818378448
+RMSE:  167475.89981456473  R2: 5.441624606352995e-07
+ToutR2: 0.009155976085865412
+T_adv_outR2: 4.827471359087956e-07
+q_adv_outR2: 0.00016893865513888603
+q_auto_outR2: 0.0009420057284035325
+q_sed_flux_totR2: 0.6509862719109616
+the loss in this Epoch 14162.076950445771
+RMSE:  167475.92789589785  R2: 2.0881504907690996e-07
+ToutR2: 0.0075337164313446
+T_adv_outR2: 1.538880831005961e-07
+q_adv_outR2: 0.00015969221558905707
+q_auto_outR2: 0.0007596724804891863
+q_sed_flux_totR2: 0.570420864128506
+the loss in this Epoch 14101.964482992887
+RMSE:  167475.9158486331  R2: 3.5268347335846223e-07
+ToutR2: 0.007803764451974361
+T_adv_outR2: 2.9239139526444534e-07
+q_adv_outR2: 0.00017174030290728682
+q_auto_outR2: 0.0008751016252070089
+q_sed_flux_totR2: 0.6989957914096306
+the loss in this Epoch 13884.194280698895
+RMSE:  167475.8976836494  R2: 5.696098630246426e-07
+ToutR2: 0.008372498496794292
+T_adv_outR2: 5.092375051072714e-07
+q_adv_outR2: 0.00017286532024639615
+q_auto_outR2: 0.000864404401148841
+q_sed_flux_totR2: 0.6979030555627495
+the loss in this Epoch 12787.31941639632
+RMSE:  167475.89787671214  R2: 5.673043711003384e-07
+ToutR2: 0.008738330736657736
+T_adv_outR2: 5.069897865642841e-07
+q_adv_outR2: 0.0001712493577292741
+q_auto_outR2: 0.0008745135810608339
+q_sed_flux_totR2: 0.6994335363447052
+the loss in this Epoch 12646.442554116249
+RMSE:  167475.89651920463  R2: 5.835156591929822e-07
+ToutR2: 0.008992033079311608
+T_adv_outR2: 5.205761244676326e-07
+q_adv_outR2: 0.0001792479222625409
+q_auto_outR2: 0.0009082359133539883
+q_sed_flux_totR2: 0.6980809272474101
+the loss in this Epoch 12568.456214502454
+RMSE:  167475.9043617588  R2: 4.898598625503034e-07
+ToutR2: 0.008961227660794371
+T_adv_outR2: 4.288959316160387e-07
+q_adv_outR2: 0.0001731187984932233
+q_auto_outR2: 0.0008815314196590749
+q_sed_flux_totR2: 0.7084662726095409
+the loss in this Epoch 12511.002347402275
+RMSE:  167475.89631540797  R2: 5.859494278558558e-07
+ToutR2: 0.008979785778106217
+T_adv_outR2: 5.237912273389417e-07
+q_adv_outR2: 0.00017771688481137918
+q_auto_outR2: 0.0008891822760544397
+q_sed_flux_totR2: 0.7115973628911444
+/jet/home/gmooers/miniconda3/envs/CPU/lib/python3.7/site-packages/scipy/stats/stats.py:3845: PearsonRConstantInputWarning: An input array is constant; the correlation coefficent is not defined.
+  warnings.warn(PearsonRConstantInputWarning())
+the loss in this Epoch 12470.271078757942
+RMSE:  167475.9020946516  R2: 5.169337118559566e-07
+ToutR2: 0.00872428074215176
+T_adv_outR2: 4.5844809085106047e-07
+q_adv_outR2: 0.0001645526426892887
+q_auto_outR2: 0.000860269176338007
+q_sed_flux_totR2: 0.7210356360453293
+RMSE:  167475.9020946516  R2: 5.169337118559566e-07
+ToutR2: 0.00872428074215176
+T_adv_outR2: 4.5844809085106047e-07
+q_adv_outR2: 0.0001645526426892887
+q_auto_outR2: 0.000860269176338007
+q_sed_flux_totR2: 0.7210356360453293
+RMSE:  0.6111861878691385  R2: 0.36041368945674407
+ToutR2: -0.5026145975672567
+T_adv_outR2: 0.34403136366380094
+q_adv_outR2: 0.0352275944329091
+q_auto_outR2: 0.4919557543260634
+q_sed_flux_totR2: 0.677318367943534
+The training time in seconds is:
+7855.540933132172
+check that I am iterating correctly over variables
+check that I am iterating correctly over outputs
+Size of global dataset for plots after subsampling:  3926016
+Beginning to make plots and writing log files
+plotted means_stds
+plotted error_stats
+plotted scatter precip
+Beginning to make y-z and y plots...
+Traceback (most recent call last):
+  File "run_simple_big_data_120.py", line 89, in <module>
+    batch_norm = batch_norm)
+  File "../../src/ml_train_nn_big_data.py", line 175, in train_wrapper
+    ind2_exc=flag_dict['ind2_exc'])
+  File "../../src/ml_plot_nn_big_data.py", line 111, in PlotAllFigs_nn
+    rewight_outputs=rewight_outputs, weight_list=weight_list,do_nn=do_nn)
+  File "../../src/ml_plot_nn_big_data.py", line 426, in make_yz_plots
+    rewight_outputs=rewight_outputs, weight_list=weight_list,do_nn=do_nn)
+  File "../../src/ml_load_big_data.py", line 542, in stats_by_yz
+    rewight_outputs=rewight_outputs,weight_list=weight_list,do_nn=do_nn)
+  File "../../src/ml_load_big_data.py", line 495, in load_one_y_big_data
+    LoadData(datafile, max_z, input_vert_vars, output_vert_vars, all_ys=False, ind_y=ind_y,
+NameError: name 'LoadData' is not defined

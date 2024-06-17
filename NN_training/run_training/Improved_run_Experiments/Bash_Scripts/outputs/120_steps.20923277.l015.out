@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "run_simple_big_data_120.py", line 89, in <module>
+    batch_norm = batch_norm)
+  File "../../src/ml_train_nn_big_data.py", line 98, in train_wrapper
+    weights=weights,
+  File "../../src/ml_load_big_data.py", line 69, in LoadDataStandardScaleData_v2
+    breakpoint()
+ValueError: cannot reshape array of size 1715341824 into shape (74)

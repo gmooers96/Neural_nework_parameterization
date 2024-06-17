@@ -1,0 +1,2 @@
+Std_ScalarNN_layers5in151out245_BN_F Using 2944512 training examples with 151 input features and 245 output targets
+slurmstepd: error: *** JOB 20773847 ON r415 CANCELLED AT 2023-11-30T02:39:18 ***

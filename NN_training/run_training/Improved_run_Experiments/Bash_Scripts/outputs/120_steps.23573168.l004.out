@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "run_simple_big_data_120.py", line 4, in <module>
+    import src.ml_train_nn_big_data as ml_train_nn
+  File "../../src/ml_train_nn_big_data.py", line 139
+    variables = xr.open_mfdataset(trainfile, , chunks=chunk)
+                                             ^
+SyntaxError: invalid syntax

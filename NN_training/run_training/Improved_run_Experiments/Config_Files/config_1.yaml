@@ -1,0 +1,21 @@
+id: 1
+training_data_path: "/ocean/projects/ees220005p/gmooers/GM_Data/training_data/Training_Parts/New_Full_Training_dataset.zarr"
+test_data_path: '/ocean/projects/ees220005p/gmooers/GM_Data/training_data/Training_Parts/New_Full_Test_dataset.zarr'
+weights_path: '/ocean/projects/ees220005p/gmooers/GM_Data/training_data/Training_Parts/New_All_Weights.nc'
+save_path: '/ocean/projects/ees220005p/gmooers/Investigations/Model_Performance/'
+single_file: '/ocean/projects/ees220005p/gmooers/GM_Data/DYAMOND2_coars_9216x4608x74_10s_4608_20200120030000_0000001080.atm.3D_resolved.nc4'
+input_vert_vars: ['Tin','qin','terra','sfc_pres']
+output_vert_vars: ['Tout', 'T_adv_out','q_adv_out','q_auto_out','q_sed_flux_tot']
+machine_type: 'cpu'
+poles: True
+training_data_volume: 10.0
+test_data_volume: 50.0
+layer_sizes: [1024,512,256,128,64]
+nametag: "my_trial"
+random_seed: 42
+z_dim: 49
+epochs: 7
+lr: 0.0000001
+batch_size: 1024 
+rewight_outputs: False
+train_new_model: True
