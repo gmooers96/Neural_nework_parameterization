@@ -1,0 +1,19 @@
+#!/bin/bash
+
+#SBATCH -A ees220005p
+#SBATCH --job-name="gpu_1"
+#SBATCH -o "outputs/gpu_1.%j.%N.out"
+#SBATCH -p GPU-shared #could do GPU-shared
+#SBATCH --gpus=v100-32:1
+#SBATCH -N 1
+#SBATCH --export=ALL
+#SBATCH -t 5:00:00 # max of 48 hours for GPU
+#SBATCH --no-requeue
+
+module purge
+
+source /jet/home/gmooers/miniconda3/bin/activate CPU
+
+cd /ocean/projects/ees220005p/gmooers/Githubs/Neural_nework_parameterization/NN_training/src/
+
+python3 ml_train_script.py /ocean/projects/ees220005p/gmooers/Githubs/Neural_nework_parameterization/NN_training/run_training/Improved_run_Experiments/Config_Files/config_1.yaml 
