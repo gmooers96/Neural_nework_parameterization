@@ -9,6 +9,7 @@ import math
 import random
 import sklearn
 from dask.diagnostics import ProgressBar
+import dask.array as da
 import psutil
 
 import torch
@@ -51,16 +52,39 @@ from matplotlib import transforms
 import yaml
 
 
-def convert_to_tensors(dask_array, desc):
-    delayed_chunks = dask_array.to_delayed().flatten()
-    tensor_list = []
+def compute_with_progress(dask_array, description):
+    # Progress bar for Dask array computation
+    with tqdm(total=dask_array.npartitions, desc=description) as pbar:
+        def progress_update(future):
+            pbar.update(1)
+        return dask_array.compute(callback=progress_update)
+
+def convert_to_tensors(data, description):
+    tensors = []
+    for item in tqdm(data, desc=description):
+        tensor = torch.tensor(item)
+        tensors.append(tensor)
+    return tensors
+
+# Convert and concatenate tensors in smaller batches
+def batch_convert_and_concat(data, batch_size, description):
+    tensors = []
+    for i in range(0, len(data), batch_size):
+        batch_data = data[i:i+batch_size]
+        batch_tensors = convert_to_tensors(batch_data, f"{description} (batch {i // batch_size + 1})")
+        tensors.append(torch.cat(batch_tensors, dim=1))
+    return torch.cat(tensors, dim=0)
+
+#def convert_to_tensors(dask_array, desc):
+#    delayed_chunks = dask_array.to_delayed().flatten()
+#    tensor_list = []
     
-    for chunk in tqdm(delayed_chunks, desc=desc, unit="chunk"):
-        np_chunk = chunk.compute()
-        tensor_chunk = torch.tensor(np_chunk, dtype=torch.float32)
-        tensor_list.append(tensor_chunk)
+#    for chunk in tqdm(delayed_chunks, desc=desc, unit="chunk"):
+#        np_chunk = chunk.compute()
+#        tensor_chunk = torch.tensor(np_chunk, dtype=torch.float32)
+#        tensor_list.append(tensor_chunk)
     
-    return tensor_list
+#    return tensor_list
 
 def convert_chunk_to_tensor(chunk):
     # Convert chunk (NumPy array) to PyTorch tensor
@@ -140,10 +164,8 @@ def train_wrapper(config_file):
     rewight_outputs=config.get('rewight_outputs')
     train_new_model=config.get('train_new_model')
     plot_analysis=config.get('plot_analysis')
-    restrict_land_frac=config.get('restrict_land_frac')
         
     nametag = "EXPERIMENT_"+str(config_id)+"_"+nametag + "_machine_type_"+machine_type+"_use_poles_"+str(poles)+"_physical_weighting_"+str(rewight_outputs)+"_epochs_"+str(epochs)+"_tr_data_percent_"+str(int(training_data_volume))+"_num_hidden_layers_"+str(len(layer_sizes))
- 
     if os.path.isdir(save_path+nametag):
         pass
     else:
@@ -165,7 +187,6 @@ def train_wrapper(config_file):
                                                         training_data_volume=training_data_volume,
                                                         test_data_volume=test_data_volume,
                                                        weights=weights,
-                                                      restrict_land_frac=restrict_land_frac,
                                                        
     )
 
@@ -198,6 +219,53 @@ def train_wrapper(config_file):
     test_inputs_np = final_test_inputs.map_blocks(lambda x: x, dtype=final_test_inputs.dtype)
     test_outputs_np = final_test_outputs.map_blocks(lambda x: x, dtype=final_test_outputs.dtype)
 
+
+    batch_size = 100
+
+    # Ensure input data is converted from Dask to NumPy if necessary, with progress bar
+    if isinstance(train_inputs_np, da.Array):
+        train_inputs_np = compute_with_progress(train_inputs_np, "Computing train inputs")
+    if isinstance(train_outputs_np, da.Array):
+        train_outputs_np = compute_with_progress(train_outputs_np, "Computing train outputs")
+    if isinstance(test_inputs_np, da.Array):
+        test_inputs_np = compute_with_progress(test_inputs_np, "Computing test inputs")
+    if isinstance(test_outputs_np, da.Array):
+        test_outputs_np = compute_with_progress(test_outputs_np, "Computing test outputs")
+
+    
+    pbar = ProgressBar()
+    pbar.register()
+    train_inputs_tensors = batch_convert_and_concat(train_inputs_np, batch_size, "Converting train inputs")
+    pbar.unregister()
+    
+    pbar = ProgressBar()
+    pbar.register()
+    train_outputs_tensors = batch_convert_and_concat(train_outputs_np, batch_size, "Converting train outputs")
+    pbar.unregister()
+    
+    pbar = ProgressBar()
+    pbar.register()
+    test_inputs_tensors = batch_convert_and_concat(test_inputs_np, batch_size, "Converting test inputs")
+    pbar.unregister()
+    
+    pbar = ProgressBar()
+    pbar.register()
+    test_outputs_tensors = batch_convert_and_concat(test_outputs_np, batch_size, "Converting test outputs")
+    pbar.unregister()
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
     #train_inputs_tensors = torch.cat(convert_to_tensors(train_inputs_np, "Converting train inputs"), axis=0)
     #with ProgressBar() as pbar:
     pbar = ProgressBar()
@@ -230,7 +298,7 @@ def train_wrapper(config_file):
     train_dataset = torch.utils.data.TensorDataset(train_inputs_tensors, train_outputs_tensors)
     test_dataset = torch.utils.data.TensorDataset(test_inputs_tensors, test_outputs_tensors)
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     
     # Instantiate the model, loss function, and optimizer
@@ -297,6 +365,8 @@ def train_wrapper(config_file):
             # Do something else if it's not a tuple
             my_z = z_dim
         
+        breakpoint()
+        
         truths, preds = ml_load.unscale_all(truth=final_test_outputs, 
                                             predictions=predictions, 
                                             z_dim=my_z, 
@@ -304,9 +374,7 @@ def train_wrapper(config_file):
                                             stds=scaled_outputs['std'], 
                                             weights=weights,
                                            )
-        np.save("/ocean/projects/ees220005p/gmooers/GM_Data/training_data/Temp_Data/Truth.npy", truths)
-        np.save("/ocean/projects/ees220005p/gmooers/GM_Data/training_data/Temp_Data/Pred.npy", preds)
-        
+
         post_processing_figures.main_plotting(truth=truths,
                                               pred=preds, 
                                               raw_data=single_file,

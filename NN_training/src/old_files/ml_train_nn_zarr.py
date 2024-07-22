@@ -1,15 +1,16 @@
-import ml_load_script as ml_load
-import post_processing_figures as post_processing_figures
-
 import numpy as np
 import time
+from sklearn.ensemble import RandomForestRegressor
+from src.ml_io_no_qp_flux_nn import write_netcdf_rf
+from src.ml_io_no_qp_flux_nn import write_netcdf_nn
+import src.ml_load_data_zarr as ml_load
 import pickle
+import src.ml_plot_nn_big_data_improved as ml_plot_nn
+import src.post_processing_figures as post_processing_figures
 import os
 import math
 import random
 import sklearn
-from dask.diagnostics import ProgressBar
-import psutil
 
 import torch
 from torch.autograd import Variable
@@ -48,57 +49,6 @@ import cartopy
 import cartopy.feature as cfeature
 import cartopy.crs as ccrs
 from matplotlib import transforms
-import yaml
-
-
-def convert_to_tensors(dask_array, desc):
-    delayed_chunks = dask_array.to_delayed().flatten()
-    tensor_list = []
-    
-    for chunk in tqdm(delayed_chunks, desc=desc, unit="chunk"):
-        np_chunk = chunk.compute()
-        tensor_chunk = torch.tensor(np_chunk, dtype=torch.float32)
-        tensor_list.append(tensor_chunk)
-    
-    return tensor_list
-
-def convert_chunk_to_tensor(chunk):
-    # Convert chunk (NumPy array) to PyTorch tensor
-    return torch.tensor(chunk, dtype=torch.float32)
-
-def get_available_memory():
-    """
-    Get available memory in bytes using psutil.
-    """
-    return psutil.virtual_memory().available
-
-def calculate_chunk_size(array_shape, dtype_size, chunk_dim='sample', memory_fraction=0.5):
-    """
-    Calculate the optimal chunk size for a Dask array.
-    
-    Parameters:
-    - array_shape: tuple, shape of the array (vertical_level, sample)
-    - dtype_size: int, size of the data type in bytes (e.g., 4 bytes for float32)
-    - chunk_dim: str, dimension to primarily chunk ('sample' or 'vertical_level')
-    - memory_fraction: float, fraction of available memory to use for chunks
-    
-    Returns:
-    - chunks: tuple, optimal chunk sizes
-    """
-    available_memory = get_available_memory()  # Get available memory dynamically
-    available_memory *= memory_fraction  # Use a fraction of available memory
-
-    total_elements = array_shape[0] * array_shape[1]
-    target_chunk_elements = available_memory // dtype_size
-    
-    if chunk_dim == 'sample':
-        chunk_size_samples = target_chunk_elements // array_shape[0]
-        chunk_size_samples = max(1, min(array_shape[1], chunk_size_samples))
-        return (array_shape[0], chunk_size_samples)
-    else:
-        chunk_size_levels = target_chunk_elements // array_shape[1]
-        chunk_size_levels = max(1, min(array_shape[0], chunk_size_levels))
-        return (chunk_size_levels, array_shape[1])
 
 
 def train_percentile_calc(percent, ds):
@@ -111,39 +61,32 @@ def train_percentile_calc(percent, ds):
 
 
 # ---  build random forest or neural net  ---
-def train_wrapper(config_file):
+def train_wrapper(training_data_path,
+                  test_data_path,
+                  weights_path,
+                  save_path,
+                  single_file,
+                  input_vert_vars, 
+                  output_vert_vars, 
+                  poles=True,
+                  training_data_volume=10.0,
+                  test_data_volume=50.0,
+                  layer_sizes = [128, 64, 32],
+                  nametag=None,
+                  random_seed=42,
+                  z_dim=74,
+                  epochs=7,
+                  lr=1e-7,
+                  batch_size=1024, 
+                  rewight_outputs = False,
+                  train_new_model = True
+                 ):
+    """Loads training data and trains and stores estimator
 
-    with open(config_file, 'r') as file:
-        config = yaml.safe_load(file)
-
-    config_id=config.get('id')
-    training_data_path=config.get('training_data_path')
-    test_data_path=config.get('test_data_path')
-    weights_path=config.get('weights_path')
-    save_path=config.get('save_path')
-    single_file=config.get('single_file')
-    input_vert_vars=config.get('input_vert_vars') 
-    output_vert_vars=config.get('output_vert_vars') 
-    machine_type=config.get('machine_type')
-    poles=config.get('poles')
-    training_data_volume=config.get('training_data_volume')
-    test_data_volume=config.get('test_data_volume')
-    layer_sizes=config.get('layer_sizes')
-    nametag=config.get('nametag')
-    random_seed=config.get('random_seed')
-    z_dim=config.get('z_dim')
-    epochs=config.get('epochs')
-    lr=config.get('lr')
-    dtype_size=config.get('dtype_size')
-    mem_frac=config.get('mem_frac')
-    batch_size=config.get('batch_size') 
-    rewight_outputs=config.get('rewight_outputs')
-    train_new_model=config.get('train_new_model')
-    plot_analysis=config.get('plot_analysis')
-    restrict_land_frac=config.get('restrict_land_frac')
-        
-    nametag = "EXPERIMENT_"+str(config_id)+"_"+nametag + "_machine_type_"+machine_type+"_use_poles_"+str(poles)+"_physical_weighting_"+str(rewight_outputs)+"_epochs_"+str(epochs)+"_tr_data_percent_"+str(int(training_data_volume))+"_num_hidden_layers_"+str(len(layer_sizes))
- 
+    Args:
+    Returns:
+    """
+    nametag = nametag + "_use_poles_"+str(poles)+"_physical_weighting_"+str(rewight_outputs)+"_lr_"+str(lr)+"_epochs_"+str(epochs)+"_tr_data_percent_"+str(training_data_volume)+"num_hidden_layers_"+str(len(layer_sizes))
     if os.path.isdir(save_path+nametag):
         pass
     else:
@@ -154,8 +97,8 @@ def train_wrapper(config_file):
     else:
         weights=None
 
-    final_train_inputs, final_test_inputs, final_train_outputs, final_test_outputs, scaled_inputs, scaled_outputs = ml_load.LoadDataStandardScaleData_v4(
-                                                        traindata=training_data_path,
+    inputs_scaled, outputs_scaled = ml_load.LoadDataStandardScaleData_v4(
+                                                       traindata=training_data_path,
                                                        testdata=test_data_path,
                                                        input_vert_vars=input_vert_vars,
                                                        output_vert_vars=output_vert_vars,
@@ -165,74 +108,19 @@ def train_wrapper(config_file):
                                                         training_data_volume=training_data_volume,
                                                         test_data_volume=test_data_volume,
                                                        weights=weights,
-                                                      restrict_land_frac=restrict_land_frac,
                                                        
     )
-
-    final_train_inputs = final_train_inputs.swapaxes(0,1)
-    final_test_inputs = final_test_inputs.swapaxes(0,1)
-    final_train_outputs = final_train_outputs.swapaxes(0,1)
-    final_test_outputs = final_test_outputs.swapaxes(0,1) 
+      
+    train_inputs_scaled_array = np.vstack([v for k, v in inputs_scaled['train'].items() if isinstance(v, np.ndarray)])
+    test_inputs_scaled_array = np.vstack([v for k, v in inputs_scaled['test'].items() if isinstance(v, np.ndarray)])
+    train_outputs_scaled_array = np.vstack([v for k, v in outputs_scaled['train'].items() if isinstance(v, np.ndarray)])
+    test_outputs_scaled_array = np.vstack([v for k, v in outputs_scaled['test'].items() if isinstance(v, np.ndarray)])
 
     set_random_seeds(seed=random_seed)
     
-    input_size = final_train_inputs.shape[1]
-    output_size = final_train_outputs.shape[1]
+    input_size = train_inputs_scaled_array.shape[0]
+    output_size = train_outputs_scaled_array.shape[0]
 
-    dtype_size = 4  # float32 size in bytes
-    mem_frac = 0.1
-    
-    chunk_size_train_inputs = calculate_chunk_size(final_train_inputs.shape, dtype_size, chunk_dim='sample', memory_fraction=mem_frac)
-    chunk_size_train_outputs = calculate_chunk_size(final_train_outputs.shape, dtype_size, chunk_dim='sample', memory_fraction=mem_frac)
-    chunk_size_test_inputs = calculate_chunk_size(final_test_inputs.shape, dtype_size, chunk_dim='sample', memory_fraction=mem_frac)
-    chunk_size_test_outputs = calculate_chunk_size(final_test_outputs.shape, dtype_size, chunk_dim='sample', memory_fraction=mem_frac)
-    
-    final_train_inputs = final_train_inputs.rechunk(chunk_size_train_inputs)
-    final_train_outputs = final_train_outputs.rechunk(chunk_size_train_outputs)
-    final_test_inputs = final_test_inputs.rechunk(chunk_size_test_inputs)
-    final_test_outputs = final_test_outputs.rechunk(chunk_size_test_outputs)
-
-    print("Creating Map Blocks...")
-    train_inputs_np = final_train_inputs.map_blocks(lambda x: x, dtype=final_train_inputs.dtype)
-    train_outputs_np = final_train_outputs.map_blocks(lambda x: x, dtype=final_train_outputs.dtype)
-    test_inputs_np = final_test_inputs.map_blocks(lambda x: x, dtype=final_test_inputs.dtype)
-    test_outputs_np = final_test_outputs.map_blocks(lambda x: x, dtype=final_test_outputs.dtype)
-
-    #train_inputs_tensors = torch.cat(convert_to_tensors(train_inputs_np, "Converting train inputs"), axis=0)
-    #with ProgressBar() as pbar:
-    pbar = ProgressBar()
-    pbar.register()
-    temp = convert_to_tensors(train_inputs_np, "Converting train inputs")
-    train_inputs_tensors = torch.cat(temp, dim=1)
-    pbar.unregister()
-    
-    #train_outputs_tensors = torch.cat(convert_to_tensors(train_outputs_np, "Converting train outputs"), axis=0)
-    pbar = ProgressBar()
-    pbar.register()
-    temp = convert_to_tensors(train_outputs_np, "Converting train outputs")
-    train_outputs_tensors = torch.cat(temp, dim=1)
-    pbar.unregister()
-    
-    #test_inputs_tensors = torch.cat(convert_to_tensors(test_inputs_np, "Converting test inputs"), axis=0)
-    pbar = ProgressBar()
-    pbar.register()
-    temp = convert_to_tensors(test_inputs_np, "Converting test inputs")
-    test_inputs_tensors = torch.cat(temp, dim=1)
-    pbar.unregister()
-    
-    #test_outputs_tensors = torch.cat(convert_to_tensors(test_outputs_np, "Converting test outputs"), axis=0)
-    pbar = ProgressBar()
-    pbar.register()
-    temp = convert_to_tensors(test_outputs_np, "Converting test outputs")
-    test_outputs_tensors = torch.cat(temp, dim=1)
-    pbar.unregister()
-    
-    train_dataset = torch.utils.data.TensorDataset(train_inputs_tensors, train_outputs_tensors)
-    test_dataset = torch.utils.data.TensorDataset(test_inputs_tensors, test_outputs_tensors)
-
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    
     # Instantiate the model, loss function, and optimizer
     model = CustomNN(input_size, layer_sizes, output_size)
 
@@ -260,10 +148,12 @@ def train_wrapper(config_file):
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
+    # Create dataloaders
+    train_loader, test_loader = create_dataloaders(train_inputs_scaled_array, train_outputs_scaled_array, test_inputs_scaled_array, test_outputs_scaled_array)
+
     # Train the model and get the losses
     name = "epochs_"+str(epochs)+"_lr_"+str(lr)+"_inputs_"+str(input_size)+"_outputs_"+str(output_size)+"_"
     savename = save_path+nametag+"/Saved_Models/"
-    
     if train_new_model is True:
         train_losses, test_losses, train_accuracies, test_accuracies, avg_epoch_time = new_train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs=epochs, device=device)
 
@@ -271,6 +161,7 @@ def train_wrapper(config_file):
         plot_metrics(train_losses, test_losses, train_accuracies, test_accuracies, avg_epoch_time, name, save_path, nametag)
 
         # save the weights of your trained model
+        #breakpoint()
         if os.path.isdir(savename):
             pass
         else:
@@ -278,39 +169,20 @@ def train_wrapper(config_file):
         
         torch.save(model.state_dict(), savename+"weights.pkl")
         save_model_to_netcdf(model, savename+"weights.nc")
-
+        
     else:
         model.load_state_dict(torch.load(savename+"weights.pkl"))
 
         # Set the model to evaluation mode
         model.eval()
+            
+    predictions = get_model_predictions(model, test_loader, device=device)
 
-
-    if plot_analysis is True:
-        
-        predictions = get_model_predictions(model, test_loader, device=device)
-
-        if isinstance(z_dim, tuple):
-            # Do something if it's a tuple
-            my_z = z_dim[0]
-        else:
-            # Do something else if it's not a tuple
-            my_z = z_dim
-        
-        truths, preds = ml_load.unscale_all(truth=final_test_outputs, 
-                                            predictions=predictions, 
-                                            z_dim=my_z, 
-                                            means=scaled_outputs['mean'], 
-                                            stds=scaled_outputs['std'], 
-                                            weights=weights,
-                                           )
-        np.save("/ocean/projects/ees220005p/gmooers/GM_Data/training_data/Temp_Data/Truth.npy", truths)
-        np.save("/ocean/projects/ees220005p/gmooers/GM_Data/training_data/Temp_Data/Pred.npy", preds)
-        
-        post_processing_figures.main_plotting(truth=truths,
+    truths, preds = ml_load.unscale_all(outputs_scaled, predictions, output_vert_vars, z_dim, weights)
+    post_processing_figures.main_plotting(truth=truths,
                                               pred=preds, 
                                               raw_data=single_file,
-                                              z_dim=my_z,
+                                              z_dim=z_dim,
                                              var_names=output_vert_vars,
                                               save_path=save_path,
                                               nametag=nametag,
@@ -352,6 +224,23 @@ class CustomNN(nn.Module):
     def forward(self, x):
         return self.network(x)
 
+# Function to create dataloaders
+def create_dataloaders(f_scl, o_scl, tf_scl, to_scl, batch_size=32):
+    # Convert numpy arrays to PyTorch tensors
+    f_scl_tensor = torch.tensor(np.swapaxes(f_scl, 0, 1), dtype=torch.float32)
+    o_scl_tensor = torch.tensor(np.swapaxes(o_scl, 0, 1), dtype=torch.float32)
+    tf_scl_tensor = torch.tensor(np.swapaxes(tf_scl, 0, 1), dtype=torch.float32)
+    to_scl_tensor = torch.tensor(np.swapaxes(to_scl, 0, 1), dtype=torch.float32)
+
+    # Create TensorDatasets
+    train_dataset = torch.utils.data.TensorDataset(f_scl_tensor, o_scl_tensor)
+    test_dataset = torch.utils.data.TensorDataset(tf_scl_tensor, to_scl_tensor)
+
+    # Create DataLoaders
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    return train_loader, test_loader
 
 # Function to train the model
 def new_train_model(model, train_loader, test_loader, criterion, optimizer, device="cuda", num_epochs=10):
@@ -489,12 +378,4 @@ def get_model_predictions(model, test_loader, device="cuda"):
             outputs = model(inputs)
             predictions.append(outputs.cpu().numpy())
     return np.vstack(predictions)
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) != 2:
-        print("Usage: python ml_train_nn_zarr.py <config_file.yaml>")
-    else:
-        train_wrapper(sys.argv[1])
-
 

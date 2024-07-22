@@ -1,4 +1,4 @@
-import ml_load_script as ml_load
+import ml_load_data_zarr_trial as ml_load
 import post_processing_figures as post_processing_figures
 
 import numpy as np
@@ -51,20 +51,9 @@ from matplotlib import transforms
 import yaml
 
 
-def convert_to_tensors(dask_array, desc):
-    delayed_chunks = dask_array.to_delayed().flatten()
-    tensor_list = []
-    
-    for chunk in tqdm(delayed_chunks, desc=desc, unit="chunk"):
-        np_chunk = chunk.compute()
-        tensor_chunk = torch.tensor(np_chunk, dtype=torch.float32)
-        tensor_list.append(tensor_chunk)
-    
-    return tensor_list
-
 def convert_chunk_to_tensor(chunk):
     # Convert chunk (NumPy array) to PyTorch tensor
-    return torch.tensor(chunk, dtype=torch.float32)
+    return torch.tensor(chunk)
 
 def get_available_memory():
     """
@@ -134,16 +123,11 @@ def train_wrapper(config_file):
     z_dim=config.get('z_dim')
     epochs=config.get('epochs')
     lr=config.get('lr')
-    dtype_size=config.get('dtype_size')
-    mem_frac=config.get('mem_frac')
     batch_size=config.get('batch_size') 
     rewight_outputs=config.get('rewight_outputs')
     train_new_model=config.get('train_new_model')
-    plot_analysis=config.get('plot_analysis')
-    restrict_land_frac=config.get('restrict_land_frac')
         
     nametag = "EXPERIMENT_"+str(config_id)+"_"+nametag + "_machine_type_"+machine_type+"_use_poles_"+str(poles)+"_physical_weighting_"+str(rewight_outputs)+"_epochs_"+str(epochs)+"_tr_data_percent_"+str(int(training_data_volume))+"_num_hidden_layers_"+str(len(layer_sizes))
- 
     if os.path.isdir(save_path+nametag):
         pass
     else:
@@ -165,19 +149,13 @@ def train_wrapper(config_file):
                                                         training_data_volume=training_data_volume,
                                                         test_data_volume=test_data_volume,
                                                        weights=weights,
-                                                      restrict_land_frac=restrict_land_frac,
                                                        
     )
 
-    final_train_inputs = final_train_inputs.swapaxes(0,1)
-    final_test_inputs = final_test_inputs.swapaxes(0,1)
-    final_train_outputs = final_train_outputs.swapaxes(0,1)
-    final_test_outputs = final_test_outputs.swapaxes(0,1) 
-
     set_random_seeds(seed=random_seed)
     
-    input_size = final_train_inputs.shape[1]
-    output_size = final_train_outputs.shape[1]
+    input_size = final_train_inputs.shape[0]
+    output_size = final_train_outputs.shape[0]
 
     dtype_size = 4  # float32 size in bytes
     mem_frac = 0.1
@@ -188,51 +166,79 @@ def train_wrapper(config_file):
     chunk_size_test_outputs = calculate_chunk_size(final_test_outputs.shape, dtype_size, chunk_dim='sample', memory_fraction=mem_frac)
     
     final_train_inputs = final_train_inputs.rechunk(chunk_size_train_inputs)
-    final_train_outputs = final_train_outputs.rechunk(chunk_size_train_outputs)
+    final_train_outputs = final_train_outputs.rechunk(chunk_size_train_outputs).astype(np.float32)
     final_test_inputs = final_test_inputs.rechunk(chunk_size_test_inputs)
-    final_test_outputs = final_test_outputs.rechunk(chunk_size_test_outputs)
+    final_test_outputs = final_test_outputs.rechunk(chunk_size_test_outputs).astype(np.float32)
+
+    total_steps_train = final_train_inputs.shape[1]
+    total_steps_test = final_test_inputs.shape[1]
 
     print("Creating Map Blocks...")
-    train_inputs_np = final_train_inputs.map_blocks(lambda x: x, dtype=final_train_inputs.dtype)
-    train_outputs_np = final_train_outputs.map_blocks(lambda x: x, dtype=final_train_outputs.dtype)
-    test_inputs_np = final_test_inputs.map_blocks(lambda x: x, dtype=final_test_inputs.dtype)
-    test_outputs_np = final_test_outputs.map_blocks(lambda x: x, dtype=final_test_outputs.dtype)
+    train_inputs_tensors = final_train_inputs.map_blocks(convert_chunk_to_tensor, dtype=torch.float32)
+    train_outputs_tensors = final_train_outputs.map_blocks(convert_chunk_to_tensor, dtype=torch.float32)
+    test_inputs_tensors = final_test_inputs.map_blocks(convert_chunk_to_tensor, dtype=torch.float32)
+    test_outputs_tensors = final_test_outputs.map_blocks(convert_chunk_to_tensor, dtype=torch.float32)
 
-    #train_inputs_tensors = torch.cat(convert_to_tensors(train_inputs_np, "Converting train inputs"), axis=0)
-    #with ProgressBar() as pbar:
-    pbar = ProgressBar()
-    pbar.register()
-    temp = convert_to_tensors(train_inputs_np, "Converting train inputs")
-    train_inputs_tensors = torch.cat(temp, dim=1)
-    pbar.unregister()
-    
-    #train_outputs_tensors = torch.cat(convert_to_tensors(train_outputs_np, "Converting train outputs"), axis=0)
-    pbar = ProgressBar()
-    pbar.register()
-    temp = convert_to_tensors(train_outputs_np, "Converting train outputs")
-    train_outputs_tensors = torch.cat(temp, dim=1)
-    pbar.unregister()
-    
-    #test_inputs_tensors = torch.cat(convert_to_tensors(test_inputs_np, "Converting test inputs"), axis=0)
-    pbar = ProgressBar()
-    pbar.register()
-    temp = convert_to_tensors(test_inputs_np, "Converting test inputs")
-    test_inputs_tensors = torch.cat(temp, dim=1)
-    pbar.unregister()
-    
-    #test_outputs_tensors = torch.cat(convert_to_tensors(test_outputs_np, "Converting test outputs"), axis=0)
-    pbar = ProgressBar()
-    pbar.register()
-    temp = convert_to_tensors(test_outputs_np, "Converting test outputs")
-    test_outputs_tensors = torch.cat(temp, dim=1)
-    pbar.unregister()
-    
-    train_dataset = torch.utils.data.TensorDataset(train_inputs_tensors, train_outputs_tensors)
-    test_dataset = torch.utils.data.TensorDataset(test_inputs_tensors, test_outputs_tensors)
+    train_inputs_delayed_chunks = train_inputs_tensors.to_delayed().flatten()
+    train_outputs_delayed_chunks = train_outputs_tensors.to_delayed().flatten()
+    test_inputs_delayed_chunks = test_inputs_tensors.to_delayed().flatten()
+    test_outputs_delayed_chunks = test_outputs_tensors.to_delayed().flatten()
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    tensor_list = []
+    pbar = ProgressBar()
+    pbar.register()
+    for chunk in tqdm(train_inputs_delayed_chunks, desc="Converting chunks", unit="chunk"):
+        tensor_chunk = chunk.compute()
+        tensor_list.append(tensor_chunk)
+    pbar.unregister()
+
+    final_train_inputs_tensors = torch.cat(tensor_list)
+
+    tensor_list = []
+    pbar = ProgressBar()
+    pbar.register()
+    for chunk in tqdm(test_inputs_delayed_chunks, desc="Converting chunks", unit="chunk"):
+        tensor_chunk = chunk.compute()
+        tensor_list.append(tensor_chunk)
+    pbar.unregister()
+
+    final_test_inputs_tensors = torch.cat(tensor_list)
+
+
+    tensor_list = []
+    pbar = ProgressBar()
+    pbar.register()
+    for chunk in tqdm(train_outputs_delayed_chunks, desc="Converting chunks", unit="chunk"):
+        tensor_chunk = chunk.compute()
+        tensor_list.append(tensor_chunk)
+    pbar.unregister()
+
+    final_train_outputs_tensors = torch.cat(tensor_list)
+
+    tensor_list = []
+    pbar = ProgressBar()
+    pbar.register()
+    for chunk in tqdm(test_outputs_delayed_chunks, desc="Converting chunks", unit="chunk"):
+        tensor_chunk = chunk.compute()
+        tensor_list.append(tensor_chunk)
+    pbar.unregister()
+
+    final_test_outputs_tensors = torch.cat(tensor_list) 
     
+    print("Creating Train Dataset...")
+    pbar = ProgressBar()
+    pbar.register()
+    train_dataset = TensorDataset(final_train_inputs_tensors, final_train_outputs_tensors)
+    pbar.unregister()
+
+    print("Creating Test Dataset...")
+    pbar = ProgressBar()
+    pbar.register()
+    test_dataset = TensorDataset(final_test_inputs_tensors, final_test_outputs_tensors)
+    pbar.unregister()
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=32, shuffle=False)
     # Instantiate the model, loss function, and optimizer
     model = CustomNN(input_size, layer_sizes, output_size)
 
@@ -263,7 +269,6 @@ def train_wrapper(config_file):
     # Train the model and get the losses
     name = "epochs_"+str(epochs)+"_lr_"+str(lr)+"_inputs_"+str(input_size)+"_outputs_"+str(output_size)+"_"
     savename = save_path+nametag+"/Saved_Models/"
-    
     if train_new_model is True:
         train_losses, test_losses, train_accuracies, test_accuracies, avg_epoch_time = new_train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs=epochs, device=device)
 
@@ -271,6 +276,7 @@ def train_wrapper(config_file):
         plot_metrics(train_losses, test_losses, train_accuracies, test_accuracies, avg_epoch_time, name, save_path, nametag)
 
         # save the weights of your trained model
+        #breakpoint()
         if os.path.isdir(savename):
             pass
         else:
@@ -284,33 +290,15 @@ def train_wrapper(config_file):
 
         # Set the model to evaluation mode
         model.eval()
+            
+    predictions = get_model_predictions(model, test_loader, device=device)
 
+    truths, preds = ml_load.unscale_all(outputs_scaled, predictions, output_vert_vars, z_dim, weights)
 
-    if plot_analysis is True:
-        
-        predictions = get_model_predictions(model, test_loader, device=device)
-
-        if isinstance(z_dim, tuple):
-            # Do something if it's a tuple
-            my_z = z_dim[0]
-        else:
-            # Do something else if it's not a tuple
-            my_z = z_dim
-        
-        truths, preds = ml_load.unscale_all(truth=final_test_outputs, 
-                                            predictions=predictions, 
-                                            z_dim=my_z, 
-                                            means=scaled_outputs['mean'], 
-                                            stds=scaled_outputs['std'], 
-                                            weights=weights,
-                                           )
-        np.save("/ocean/projects/ees220005p/gmooers/GM_Data/training_data/Temp_Data/Truth.npy", truths)
-        np.save("/ocean/projects/ees220005p/gmooers/GM_Data/training_data/Temp_Data/Pred.npy", preds)
-        
-        post_processing_figures.main_plotting(truth=truths,
+    post_processing_figures.main_plotting(truth=truths,
                                               pred=preds, 
                                               raw_data=single_file,
-                                              z_dim=my_z,
+                                              z_dim=z_dim,
                                              var_names=output_vert_vars,
                                               save_path=save_path,
                                               nametag=nametag,
@@ -352,6 +340,51 @@ class CustomNN(nn.Module):
     def forward(self, x):
         return self.network(x)
 
+
+class TensorDataset(Dataset):
+    def __init__(self, inputs, outputs):
+        self.inputs = inputs
+        self.outputs = outputs
+    
+    def __len__(self):
+        return len(self.inputs)
+    
+    def __getitem__(self, idx):
+        return self.inputs[idx], self.outputs[idx]
+
+
+
+#class DaskArrayDataset(Dataset):
+#    def __init__(self, inputs, outputs):
+#        # Do not assign Dask arrays directly to attributes
+#        self.inputs = inputs
+#        self.outputs = outputs
+#        self.length = inputs.shape[1]
+
+#    def __len__(self):
+#        return self.length
+
+#    def __getitem__(self, idx):
+#        # Compute only when accessing the data
+#        input_chunk = self.inputs[idx].compute()
+#        output_chunk = self.outputs[idx].compute()
+#        return torch.tensor(input_chunk, dtype=torch.float32), torch.tensor(output_chunk, dtype=torch.float32)
+
+
+#class DaskArrayDataset(Dataset):
+#    def __init__(self, inputs_dask, outputs_dask):
+#        self.inputs_dask = inputs_dask
+#        self.outputs_dask = outputs_dask
+#        self.num_samples = inputs_dask.shape[1]  # Assuming inputs are 2D (features x samples)
+
+#    def __len__(self):
+#        return self.num_samples
+
+#    def __getitem__(self, idx):
+        # Extract input and output samples lazily from the Dask arrays and convert to PyTorch tensors
+#        input_sample = self.inputs_dask[:, idx].compute()  # Compute only the needed chunk
+#        output_sample = self.outputs_dask[idx].compute()
+#        return torch.tensor(input_sample, dtype=torch.float32), torch.tensor(output_sample, dtype=torch.float32)
 
 # Function to train the model
 def new_train_model(model, train_loader, test_loader, criterion, optimizer, device="cuda", num_epochs=10):
@@ -496,5 +529,4 @@ if __name__ == "__main__":
         print("Usage: python ml_train_nn_zarr.py <config_file.yaml>")
     else:
         train_wrapper(sys.argv[1])
-
 

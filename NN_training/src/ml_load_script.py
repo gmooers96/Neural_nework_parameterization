@@ -2,6 +2,7 @@ import numpy as np
 import math
 import zarr
 import dask.array as da
+from tqdm import tqdm
 
 
 def train_percentile_calc(percent, ds):
@@ -25,6 +26,25 @@ def unstandardize(array, mean, std, weight=None):
         return (array * std) + mean
     else:
         return ((array * std) + mean) / weight
+
+def unscale_all(truth, predictions, z_dim, means, stds, weights=None):
+    unscaled_truths = []
+    unscaled_predictions = []
+    count = 0
+    for k, v in tqdm(means.items(), desc="Unscaling"):
+        unscaled_truths.append(unstandardize(array=truth[:,int(z_dim*count):int(z_dim*(count+1))],
+                                                                                mean = means[k],
+                                                                                std=stds[k],
+                                                                                weight=weights,
+                                                                                ))
+        unscaled_predictions.append(unstandardize(array=predictions[:,int(z_dim*count):int(z_dim*(count+1))],
+                                                                                mean = means[k],
+                                                                                std=stds[k],
+                                                                                weight=weights,
+                                                                                ))
+        count = count+1
+    
+    return da.concatenate(unscaled_truths, axis=1).transpose(), da.concatenate(unscaled_predictions, axis=1).transpose()
 
 def slice_by_lat_index(lats, n_files, n_x):
     absolute_differences = np.abs(lats - 70.)
@@ -60,6 +80,7 @@ def LoadDataStandardScaleData_v4(traindata,
                                  training_data_volume=10.0,
                                  test_data_volume=50.0,
                                  weights=None,
+                                 restrict_land_frac=False,
                                  memory_limit_gb=15):
     """
     Load and standardize data from Zarr files efficiently using calculated chunk size.
@@ -100,8 +121,14 @@ def LoadDataStandardScaleData_v4(traindata,
 
     for inputs in input_vert_vars:
 
+        #insert key 
+
         train_dask_array = da.from_zarr(train_store[inputs])
         test_dask_array = da.from_zarr(test_store[inputs])
+
+        if (restrict_land_frac is True) and (inputs == 'terra'):
+            train_dask_array = train_dask_array[0,:]
+            test_dask_array = test_dask_array[0,:]
         
         mean = train_dask_array.mean()
         std = train_dask_array.std()

@@ -632,6 +632,7 @@ def animation_generator_gif(
         contour_precision = 0
 
     #end new code
+    breakpoint()
     levels = np.round(np.arange(vmin, vmax + (
         vmax - vmin) / contour_levels, (
         vmax - vmin) / contour_levels), decimals=contour_precision)
