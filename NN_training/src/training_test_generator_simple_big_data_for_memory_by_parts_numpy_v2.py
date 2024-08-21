@@ -1,4 +1,4 @@
-import src.ml_load as ml_load
+#import src.ml_load as ml_load
 from netCDF4 import Dataset
 import netCDF4
 import numpy as np
@@ -11,7 +11,6 @@ import random
 import pdb
 import math
 import xarray as xr
-#from memory_profiler import profile
 from dask.distributed import Client, LocalCluster
 import dask.array as da
 import os
@@ -24,8 +23,8 @@ def build_training_dataset(filepath,
                            my_label,
                            filestart,
                            fileend,
-                           train_size=0.9, 
                            n_z_input=74,
+                           ground_levels=1,
                            flag_dict=dict(), 
                            rewight_outputs = False,
                            shuffle = True,
@@ -33,18 +32,14 @@ def build_training_dataset(filepath,
     """Builds training and testing datasets
     """
     
-    
-    chunks = {'z': 74, 'lat': 100, 'lon': 100}
-    
     all_files = sorted(glob.glob(filepath))
     
     
     # Select the first 300 files
-    first_300_files = all_files[filestart:fileend]
-    
+    subset_of_files = all_files[filestart:fileend]
     if shuffle is True:
-        random.shuffle(first_300_files)
-    variables = xr.open_mfdataset(first_300_files, chunks=chunks)
+        random.shuffle(subset_of_files)
+    variables = xr.open_mfdataset(subset_of_files)
   
         
     x = variables.lon  # m
@@ -58,7 +53,7 @@ def build_training_dataset(filepath,
     n_files = len(variables.time)
     
     if flag_dict['land_frac']:
-        terra = variables.TERRA[:,:n_z_input]
+        terra = xr.DataArray.squeeze(variables.TERRA[:,:ground_levels])
         
     if flag_dict['sfc_pres']:
         SFC_PRES = variables.SFC_REFERENCE_P
@@ -155,9 +150,14 @@ def build_training_dataset(filepath,
         my_dict_train["q_sed_flux_tot"] = (("z","sample"), q_sed_flux_tot)
     
     if flag_dict['land_frac']:
-        terra = terra.transpose("z","lat","time","lon").values
-        terra = np.reshape(terra, (n_z_input, n_y*n_files*n_x))
-        my_dict_train["terra"] = (("z","sample"), terra)
+        if ground_levels > 1:
+            terra = terra.transpose("z","lat","time","lon").values
+            terra = np.reshape(terra, (ground_levels, n_y*n_files*n_x))
+            my_dict_train["terra"] = (("z","sample"), terra)
+        else:
+            terra = terra.transpose("lat","time","lon").values
+            terra = np.reshape(terra, (n_y*n_files*n_x))
+            my_dict_train["terra"] = (("sample"), terra)
         del terra
     
     if flag_dict['sfc_pres']:
