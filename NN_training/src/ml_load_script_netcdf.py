@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 
 def train_percentile_calc(percent, ds):
+    """Helper function to splice data to percentage you want to train with."""
     sample = len(ds.sample)
     lon = len(ds.lon)
     lat = len(ds.lat)
@@ -20,7 +21,7 @@ def normalize_by_level(data_array,
                        std = None,
                       ):
     """
-    Normalize a DataArray at each level separately.
+    Normalize a DataArray at each level separately. For NN inputs.
 
     Parameters:
     data_array (xr.DataArray): The input DataArray with shape (level, sample).
@@ -39,19 +40,6 @@ def normalize_by_level(data_array,
 
     return normalized_array, mean, std
 
-def standardize_inputs(arr, mean=None, std=None):
-    """Treat each vertical level differently."""
-    if mean is None:
-        mean = arr.mean(axis=1, keepdims=True)
-    if std is None:
-        std = arr.std(axis=1, keepdims=True)
-     # Broadcast mean and std to match the shape of arr
-    breakpoint()
-    mean = mean.broadcast_like(arr, exclude='sample')
-    std = std.broadcast_like(arr, exclude='sample')
-    
-    return (arr - mean) / std, mean, std
-
 def standardize_outputs(arr, mean=None, std=None):
     """Normalize ignoring vertical levels."""
     if mean is None:
@@ -61,12 +49,14 @@ def standardize_outputs(arr, mean=None, std=None):
     return (arr - mean) / std, mean, std
 
 def unstandardize_outputs(array, mean, std, weight=None):
+    """Helper function for unscale_all function."""
     if weight is None:
         return (array * std) + mean
     else:
         return ((array * std) + mean) / weight
 
 def unscale_all(truth, predictions, z_dim, means, stds, weights=None):
+    """Unscale the Test Data and NN outputs after the NN is trained."""
     unscaled_truths = []
     unscaled_predictions = []
     count = 0
@@ -86,6 +76,7 @@ def unscale_all(truth, predictions, z_dim, means, stds, weights=None):
     return da.concatenate(unscaled_truths, axis=1).transpose(), da.concatenate(unscaled_predictions, axis=1).transpose()
 
 def slice_by_lat_index(lats, n_files, n_x):
+    """Function to splice away the poles. Not typically used."""
     absolute_differences = np.abs(lats - 70.)
     nh_closest_index = np.argmin(absolute_differences)
     absolute_differences = np.abs(lats + 70.0)
@@ -98,8 +89,10 @@ def slice_by_lat_index(lats, n_files, n_x):
     return int(start_idx), int(end_idx)
 
 def convert_dict_to_array(my_dict):
+    """Helper function to prepare final shape of input/output vector for NN."""
     dask_arrays = []
     for key, array in my_dict.items():
+        # this may be redundant and taken care of earlier in the full function.
         if array.ndim == 1:
             array = array[np.newaxis, :]
         dask_arrays.append(array)
@@ -137,10 +130,15 @@ def LoadDataStandardScaleData_v4(traindata,
     :return: Scaled input and output dictionaries.
     """
 
+    #open up the train (typically 5) netcdf files
     train_store = xr.open_mfdataset(traindata)
+
+    # open up the test .nc file
     test_store = xr.open_dataset(testdata)
-    
+
+    # what percentage of the training data do you want to bring in
     training_data_percentage = train_percentile_calc(training_data_volume, train_store)
+    # what percentage of the training data do you want to bring in
     test_data_percentage = train_percentile_calc(test_data_volume, test_store)
     
     scaled_inputs = {
@@ -162,15 +160,18 @@ def LoadDataStandardScaleData_v4(traindata,
         train_dask_array = train_store[inputs]
         test_dask_array = test_store[inputs]
 
+        # this was originally to splce land frac from column to just a scalar at the sfc -- I think might be redundant now
         if (restrict_land_frac is True) and (inputs == 'terra'):
             train_dask_array = train_dask_array[0,:]
             test_dask_array = test_dask_array[0,:]
 
         num_dimensions = train_dask_array.ndim
         if num_dimensions >= 2:
+            #scale the data by level for vertical columns
             scaled_train_dask_array, mean, std = normalize_by_level(train_dask_array)
             scaled_test_dask_array, mean, std = normalize_by_level(test_dask_array, mean, std)
         else:
+            #scale by level not necessary for scalars land_frac, sfc_pres
             scaled_train_dask_array, mean, std = standardize_outputs(train_dask_array)
             scaled_test_dask_array, mean, std = standardize_outputs(test_dask_array, mean, std)
 
@@ -191,7 +192,8 @@ def LoadDataStandardScaleData_v4(traindata,
             scaled_train_dask_array[end_idx_train:] = 0
             scaled_test_dask_array[:start_idx_test] = 0
             scaled_test_dask_array[end_idx_test:] = 0
-            
+
+        #splice data to the percentage you want to work with
         if len(scaled_train_dask_array.shape) == 2:
             scaled_train_dask_array = scaled_train_dask_array[:, :training_data_percentage]
             scaled_test_dask_array = scaled_test_dask_array[:, :test_data_percentage]
@@ -199,6 +201,7 @@ def LoadDataStandardScaleData_v4(traindata,
             scaled_train_dask_array = scaled_train_dask_array[:training_data_percentage]
             scaled_test_dask_array = scaled_test_dask_array[:test_data_percentage]
 
+        # for the scalar inputs (sfc_pres, land_frac), you need to reshape to give a "vertical dim" for concatination with other inputs to full input vector
         if len(scaled_train_dask_array.dims) == 1:
             scaled_train_dask_array = scaled_train_dask_array.expand_dims(dim='new_dim', axis=0)
             scaled_test_dask_array = scaled_test_dask_array.expand_dims(dim='new_dim', axis=0)
@@ -208,6 +211,7 @@ def LoadDataStandardScaleData_v4(traindata,
         scaled_inputs['mean'][inputs] = mean
         scaled_inputs['std'][inputs] = std
 
+    # repeat above but for outputs. A bit simpler because all outputs have the same vertical dimension (no scalars here), don't need to be scaled by level
     for outputs in output_vert_vars:
         print(outputs)
         train_dask_array = train_store[outputs]
@@ -215,7 +219,8 @@ def LoadDataStandardScaleData_v4(traindata,
 
         scaled_train_dask_array, mean, std = standardize_outputs(train_dask_array)
         scaled_test_dask_array, mean, std = standardize_outputs(test_dask_array, mean, std)
-            
+
+        # This is probably not necessary for outputs (no land-frac, sfc_pres)
         if len(scaled_train_dask_array.shape) == 2:
             scaled_train_dask_array = scaled_train_dask_array[:, :training_data_percentage]
             scaled_test_dask_array = scaled_test_dask_array[:, :test_data_percentage]
@@ -228,11 +233,13 @@ def LoadDataStandardScaleData_v4(traindata,
         scaled_outputs['std'][outputs] = std
         scaled_outputs['test'][outputs] = scaled_test_dask_array
 
+    # convert from dict of variables to single data array
     final_train_inputs = convert_dict_to_array(scaled_inputs['train'])
     final_test_inputs = convert_dict_to_array(scaled_inputs['test'])
     final_train_outputs = convert_dict_to_array(scaled_outputs['train'])
     final_test_outputs = convert_dict_to_array(scaled_outputs['test'])
 
+    #align dimensions for NN (sample, input/output shape)
     final_train_inputs = final_train_inputs.swapaxes(0,1)
     final_test_inputs = final_test_inputs.swapaxes(0,1)
     final_train_outputs = final_train_outputs.swapaxes(0,1)

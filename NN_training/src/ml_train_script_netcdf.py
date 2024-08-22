@@ -52,6 +52,8 @@ import yaml
 
 
 def convert_to_tensors(dask_array, desc):
+    """Primitive version of the conversion of the data to tensors by batches."""
+    # delayed is a form of xarray lazy loading for the data array
     delayed_chunks = dask_array.to_delayed().flatten()
     tensor_list = []
     
@@ -62,13 +64,9 @@ def convert_to_tensors(dask_array, desc):
     
     return tensor_list
 
-def convert_chunk_to_tensor(chunk):
-    # Convert chunk (NumPy array) to PyTorch tensor
-    return torch.tensor(chunk, dtype=torch.float32)
-
 def get_available_memory():
     """
-    Get available memory in bytes using psutil.
+    Get available memory in bytes using psutil. Helps to determine the chunk size
     """
     return psutil.virtual_memory().available
 
@@ -99,15 +97,6 @@ def calculate_chunk_size(array_shape, dtype_size, chunk_dim='sample', memory_fra
         chunk_size_levels = target_chunk_elements // array_shape[1]
         chunk_size_levels = max(1, min(array_shape[0], chunk_size_levels))
         return (chunk_size_levels, array_shape[1])
-
-
-def train_percentile_calc(percent, ds):
-    sample = ds.sample
-    lon = ds.lon
-    times = int(len(sample) / len(lon))
-    proportion = math.floor(times*percent/100.)
-    splicer = int(proportion*len(lon))
-    return splicer
 
 
 # ---  build random forest or neural net  ---
@@ -141,7 +130,8 @@ def train_wrapper(config_file):
     train_new_model=config.get('train_new_model')
     plot_analysis=config.get('plot_analysis')
     restrict_land_frac=config.get('restrict_land_frac')
-        
+
+    # generate unique tag to save the experiment
     nametag = "EXPERIMENT_"+str(config_id)+"_"+nametag + "_machine_type_"+machine_type+"_use_poles_"+str(poles)+"_physical_weighting_"+str(rewight_outputs)+"_epochs_"+str(epochs)+"_tr_data_percent_"+str(int(training_data_volume))+"_num_hidden_layers_"+str(len(layer_sizes))
  
     if os.path.isdir(save_path+nametag):
@@ -153,7 +143,7 @@ def train_wrapper(config_file):
         weights = xr.open_dataset(weights_path).norms.values
     else:
         weights=None
-
+    # scale the data, and reformat to (sample, input or output size)
     final_train_inputs, final_test_inputs, final_train_outputs, final_test_outputs, scaled_inputs, scaled_outputs = ml_load.LoadDataStandardScaleData_v4(
                                                         traindata=training_data_path,
                                                        testdata=test_data_path,
@@ -169,12 +159,7 @@ def train_wrapper(config_file):
                                                        
     )
 
-
-    final_train_inputs = final_train_inputs
-    final_test_inputs = final_test_inputs
-    final_train_outputs = final_train_outputs
-    final_test_outputs = final_test_outputs
-
+    # to ensure unique starting point of NN weights
     set_random_seeds(seed=random_seed)
 
     input_size = final_train_inputs.shape[1]
@@ -182,57 +167,54 @@ def train_wrapper(config_file):
 
     dtype_size = 4  # float32 size in bytes
     mem_frac = 0.1
-    
+
+    # calculate a chunk size based on memory aviaible in selected queue (e.g. RM-512)
     chunk_size_train_inputs = calculate_chunk_size(final_train_inputs.shape, dtype_size, chunk_dim='sample', memory_fraction=mem_frac)
     chunk_size_train_outputs = calculate_chunk_size(final_train_outputs.shape, dtype_size, chunk_dim='sample', memory_fraction=mem_frac)
     chunk_size_test_inputs = calculate_chunk_size(final_test_inputs.shape, dtype_size, chunk_dim='sample', memory_fraction=mem_frac)
     chunk_size_test_outputs = calculate_chunk_size(final_test_outputs.shape, dtype_size, chunk_dim='sample', memory_fraction=mem_frac)
-    
+
+    # rechunk the data to fit wthin memory limits
     final_train_inputs = final_train_inputs.rechunk(chunk_size_train_inputs)
     final_train_outputs = final_train_outputs.rechunk(chunk_size_train_outputs)
     final_test_inputs = final_test_inputs.rechunk(chunk_size_test_inputs)
     final_test_outputs = final_test_outputs.rechunk(chunk_size_test_outputs)
 
     print("Creating Map Blocks...")
+    # prepare data to be in numpy format in delayed loading blocks
     train_inputs_np = final_train_inputs.map_blocks(lambda x: x, dtype=final_train_inputs.dtype)
     train_outputs_np = final_train_outputs.map_blocks(lambda x: x, dtype=final_train_outputs.dtype)
     test_inputs_np = final_test_inputs.map_blocks(lambda x: x, dtype=final_test_inputs.dtype)
     test_outputs_np = final_test_outputs.map_blocks(lambda x: x, dtype=final_test_outputs.dtype)
 
-    #train_inputs_tensors = torch.cat(convert_to_tensors(train_inputs_np, "Converting train inputs"), axis=0)
-    #with ProgressBar() as pbar:
+    # converts the data to tensors by chunks -- time consuming (I think can be ~1 hour)
+    # idea - reformat to do this by baqtch size rather than chunk
     pbar = ProgressBar()
     pbar.register()
     temp = convert_to_tensors(train_inputs_np, "Converting train inputs")
     train_inputs_tensors = torch.cat(temp, dim=1)
     pbar.unregister()
     
-    #train_outputs_tensors = torch.cat(convert_to_tensors(train_outputs_np, "Converting train outputs"), axis=0)
+
     pbar = ProgressBar()
     pbar.register()
     temp = convert_to_tensors(train_outputs_np, "Converting train outputs")
     train_outputs_tensors = torch.cat(temp, dim=1)
     pbar.unregister()
     
-    #test_inputs_tensors = torch.cat(convert_to_tensors(test_inputs_np, "Converting test inputs"), axis=0)
     pbar = ProgressBar()
     pbar.register()
     temp = convert_to_tensors(test_inputs_np, "Converting test inputs")
     test_inputs_tensors = torch.cat(temp, dim=1)
     pbar.unregister()
     
-    #test_outputs_tensors = torch.cat(convert_to_tensors(test_outputs_np, "Converting test outputs"), axis=0)
     pbar = ProgressBar()
     pbar.register()
     temp = convert_to_tensors(test_outputs_np, "Converting test outputs")
     test_outputs_tensors = torch.cat(temp, dim=1)
     pbar.unregister()
 
-    print(f"Shape of train_inputs_tensors: {train_inputs_tensors.shape}")
-    print(f"Shape of train_outputs_tensors: {train_outputs_tensors.shape}")
-    print(f"Shape of test_inputs_tensors: {test_inputs_tensors.shape}")
-    print(f"Shape of test_outputs_tensors: {test_outputs_tensors.shape}")
-
+    # format the data for a pytorch NN
     train_dataset = torch.utils.data.TensorDataset(train_inputs_tensors, train_outputs_tensors)
     test_dataset = torch.utils.data.TensorDataset(test_inputs_tensors, test_outputs_tensors)
 
@@ -242,7 +224,7 @@ def train_wrapper(config_file):
     # Instantiate the model, loss function, and optimizer
     model = CustomNN(input_size, layer_sizes, output_size)
 
-    # Use DataParallel for multiple GPUs
+    # Use DataParallel for multiple GPUs -- this allows for the option of future paralleization
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs!")
@@ -262,7 +244,9 @@ def train_wrapper(config_file):
                                 save_graph=True,
                                 directory=path_for_design,
                                     )
-      
+
+
+    # in my opinion, logical stardard loss function
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 

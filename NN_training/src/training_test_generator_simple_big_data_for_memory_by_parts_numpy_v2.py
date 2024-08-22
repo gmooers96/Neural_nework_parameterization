@@ -18,25 +18,27 @@ import os
 from src.train_test_generator_helper_functions import  create_specific_data_string_desc,  calculate_renormalization_factors_sample, get_train_test_split
 
 
-def build_training_dataset(filepath,
-                           savepath,
+def build_training_dataset(filepath, #where the coarse-grained simulation data will come from
+                           savepath, # where to save the preprocessed netcdf data
                            my_label,
-                           filestart,
-                           fileend,
-                           n_z_input=74,
-                           ground_levels=1,
+                           filestart, #what time index in the file to start at (hour index)
+                           fileend,   # what time index in the file to end at (typically start + 160 steps (hours))
+                           n_z_input=74, # what vertical level to cut off at
+                           ground_levels=1, # input to turn the land fraction into a scalar instead of a column
                            flag_dict=dict(), 
                            rewight_outputs = False,
                            shuffle = True,
                           ):
     """Builds training and testing datasets
     """
-    
+
+    # this collects EVERY coarse-grained data file
     all_files = sorted(glob.glob(filepath))
     
     
-    # Select the first 300 files
+    # Select the subset of the data we want to preprocess
     subset_of_files = all_files[filestart:fileend]
+    # shuffles the order of the preprocessed data files for opening temporally if set to True
     if shuffle is True:
         random.shuffle(subset_of_files)
     variables = xr.open_mfdataset(subset_of_files)
@@ -50,25 +52,31 @@ def build_training_dataset(filepath,
     n_x = x.size
     n_y = y.size
     n_z = z.size
-    n_files = len(variables.time)
-    
+    n_files = len(variables.time) #typically 160
+
+    #default on
     if flag_dict['land_frac']:
         terra = xr.DataArray.squeeze(variables.TERRA[:,:ground_levels])
-        
+
+    #default on
     if flag_dict['sfc_pres']:
         SFC_PRES = variables.SFC_REFERENCE_P
-        
+
+    # default off
     if flag_dict['skt']:
         SKT = variables.SKT
-    
+
+    #default off
     if flag_dict['cos_lat']:
         cos_lat = np.zeros((n_files, n_y, n_x))
         cos_lat[:, :, :] = xr.ufuncs.cos(xr.ufuncs.radians(y.values[None, :, None]))
-    
+
+    #default off
     if flag_dict['sin_lon']:
         sin_lon = np.zeros((n_files, n_y, n_x))
         sin_lon[:, :, :] = xr.ufuncs.sin(xr.ufuncs.radians(x.values[None, None, :]))
-    
+
+    #code adapted from Janni
     adz = xr.zeros_like(z[:n_z_input]) 
     dz = 0.5*(z[0]+z[1]) 
     adz[0] = 1.
@@ -81,7 +89,8 @@ def build_training_dataset(filepath,
     
     Tin = variables.TABS_SIGMA[:,:n_z_input] #originally just called tabs
     Qrad = variables.QRAD_SIGMA[:,:n_z_input] / 86400.
-    
+
+    #default on 
     if flag_dict['qin_feature']:
         qt = (variables.QV_SIGMA[:,:n_z_input] + variables.QC_SIGMA[:,:n_z_input] + variables.QI_SIGMA[:,:n_z_input]) / 1000.0 
     
@@ -115,7 +124,10 @@ def build_training_dataset(filepath,
     data_specific_description = create_specific_data_string_desc(flag_dict)
     
     my_dict_train = {}
-    
+
+    # code below reshapes the data into (z column, sample) where sample = lat*time*lon
+    # Janni's version reshaped to (z, lat, sample) where sample = time*lon
+    # at this point in the code (.values) the data is transformed from an xarray/DataArray object into a numpy array in memory
     if flag_dict['Tin_feature']:
         Tin = Tin.transpose("z","lat","time","lon").values
         Tin = np.reshape(Tin, (n_z_input, n_y*n_files*n_x))
@@ -173,6 +185,7 @@ def build_training_dataset(filepath,
         del skt
     
     my_weight_dict = {}
+    # code from Janni -- calculates std / min(std) of output vars for normailzation
     norm_list = calculate_renormalization_factors_sample(Tout,
                                                        T_adv_out,
                                                        q_adv_out,
