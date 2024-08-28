@@ -1,0 +1,19 @@
+#!/bin/bash
+
+#SBATCH -A ees220005p
+#SBATCH --job-name="cpu_RM"
+#SBATCH -o "outputs/cpu_RM.%j.%N.out"
+#SBATCH -p RM #could do RM-512, RM-shared
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=64
+#SBATCH --export=ALL
+#SBATCH -t 2:30:00 # max of 48 hours for GPU
+#SBATCH --mem=200G
+#SBATCH --no-requeue
+
+module purge
+
+source /jet/home/gmooers/miniconda3/bin/activate CPU
+f2py3 -c -m  advect_scalar3D_f2py_my_min2  advect_scalar3D_f2py.f90
+
+python3 gsam_main_loop.py
