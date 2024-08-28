@@ -1,0 +1,15 @@
+run_num=1
+for ((i=2; i<874; i++));
+do
+matlab_f=gsam_main_loop;
+ matlab_orig=${matlab_f}.py;
+new_mat=${matlab_f}${i}.py;
+cp -p ${matlab_orig} ${new_mat};
+sed -i "s/start_time=137880/start_time=137880+3600*${i}/g" ${new_mat};
+script_f=my_bash_script
+orig_script=${script_f};
+new_script=${script_f}${i};
+cp -p ${orig_script} ${new_script};
+sed -i "s/gsam_main_loop/gsam_main_loop${i}/g" ${new_script};
+
+done
